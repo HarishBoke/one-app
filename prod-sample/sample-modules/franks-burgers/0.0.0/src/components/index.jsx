@@ -91,6 +91,6 @@ export default compose(
   holocronModule({
     name: 'franks-burgers',
     load: () => (dispatch) => dispatch(loadLanguagePack('franks-burgers', { fallbackLocale: 'en-US' })),
-    options: { ssr: true },
+    options: { ssr: false },
   })
 )(FranksBurgers);
