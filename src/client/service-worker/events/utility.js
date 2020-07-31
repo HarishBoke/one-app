@@ -18,14 +18,20 @@ import {
   match, put, remove, getMetaData, setMetaData, createCacheName,
 } from '@americanexpress/one-service-worker';
 
-// bundling
+// bundle:
+// matches the /legacy/ directory for one-app and .legacy.browser. for modules
 const legacyRegExp = /\.legacy\.browser\.|\/legacy\//;
-// language
+// language:
 const appLocaleRegExp = /i18n\/([^/]*)\.js$/;
 const moduleLocaleRegExp = /([a-z]{2,3}(-[a-zA-Z]{1,})?)\/[^/]*\.json$/;
+// url:
+// matches the full url path in the first capture group and
+// the search params in the second capture group
+const clientCacheRevisionRegexp = /(.*)(\?[^/]*)$/;
 
-export function createResourceMetaData(event, resourceInfo, revision) {
-  const [name, baseUrl] = resourceInfo;
+export function createResourceMetaData(event, resourceInfo) {
+  const [name, baseUrl, revision] = resourceInfo;
+  // we extract the version from the baseUrl provided
   const [version] = baseUrl.replace(/\/$/, '').split('/').reverse();
   const { request } = event;
 
@@ -40,6 +46,10 @@ export function createResourceMetaData(event, resourceInfo, revision) {
     [path, locale] = request.url.match(appLocaleRegExp);
     // write over the intl resource to allow locale invalidation
     path = path.replace(locale, 'language');
+  } else {
+    // if not an i18n resource type, we only extract the base filename as the path
+    // we remove the clientCacheRevision from the url if present
+    path = request.url.replace(baseUrl, '').replace(clientCacheRevisionRegexp, '$1');
   }
 
   let bundle = 'browser';
@@ -48,16 +58,28 @@ export function createResourceMetaData(event, resourceInfo, revision) {
   }
 
   const metaData = {
+    // bundle type which will be either 'browser' or 'legacy'
     bundle,
+    // type can be one of ['one-app', 'modules', 'lang-packs']
     type,
+    // name will be the module name for module resources (module, lang-pack)
+    // and will be 'app' if it is a one-app resource
     name,
+    // the version is the current version of any resource
     version,
-    path: path || request.url.replace(baseUrl, '').replace(/(.*)(\?[^/]*)$/, '$1'),
+    // path will be the base filename and is used to point the correct meta-data with a resource
+    path,
+    // url will be the original url requested, used to add/delete any resource
     url: request.url,
+    // cacheName is the name of the cache storing the resource
+    // it is used to match and put resources into the correct cache, and remove it when needed
     cacheName: createCacheName(type),
   };
 
+  // optional meta data when applicable
+  // revision will be included if the clientCacheRevision key is present in the url
   if (revision) metaData.revision = revision;
+  // locale will be included when either a module language pack or one-app i18n file
   if (locale) metaData.locale = locale;
 
   return metaData;
@@ -73,22 +95,19 @@ export function markResourceForRemoval(cachedMetaRecord, newMetaRecord) {
 
 export function invalidateCacheResource(event, meta) {
   const [resourcePath] = meta.path.split('/').reverse();
-  const resourceId = `${meta.type}/${meta.name}/${resourcePath}`;
-  const resourceUrl = new Request(`/${resourceId}`).url;
+  const cacheName = [meta.type, meta.name, resourcePath].join('/');
   return (response) => {
     event.waitUntil(
       getMetaData({
-        url: resourceUrl,
-        cacheName: resourceId,
+        cacheName,
       }).then((cachedMeta) => {
         if (cachedMeta.url && markResourceForRemoval(cachedMeta, meta)) {
           event.waitUntil(
-            remove(new Request(cachedMeta.url), { cacheName: meta.cacheName })
+            remove(new Request(cachedMeta.url), { cacheName: cachedMeta.cacheName })
           );
         }
         return setMetaData({
-          url: resourceUrl,
-          cacheName: resourceId,
+          cacheName,
           metadata: meta,
         });
       })

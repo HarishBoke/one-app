@@ -30,10 +30,10 @@ import {
 jest.mock('@americanexpress/one-service-worker', () => ({
   put: jest.fn(() => Promise.resolve()),
   match: jest.fn(() => Promise.resolve()),
-  getMetaData: jest.fn(() => Promise.resolve()),
+  getMetaData: jest.fn(() => Promise.resolve({})),
   setMetaData: jest.fn(() => Promise.resolve()),
   remove: jest.fn(() => Promise.resolve()),
-  createCacheName: jest.fn((passthrough) => passthrough),
+  createCacheName: jest.fn((passthrough) => ['__sw', passthrough].join('/')),
 }));
 
 beforeAll(() => {
@@ -45,22 +45,16 @@ beforeEach(() => {
   jest.clearAllMocks();
 });
 
-const metaBluePrint = {
-  revision: '101010',
-  locale: 'en-US',
-  bundle: 'browser',
-  type: 'modules',
-  name: 'assets',
-  version: '1.0.0',
-  path: '/cat.jpg',
-  url: 'https://example.com/assets/1.0.0/cat.jpg',
-  cacheName: 'modules',
-};
-
 describe(markResourceForRemoval.name, () => {
   test('invalidates each matrix of validation', () => {
-    const meta = { ...metaBluePrint };
-    expect(markResourceForRemoval(metaBluePrint, meta)).toBe(false);
+    const existingMetaData = {
+      revision: '101010',
+      locale: 'en-US',
+      bundle: 'browser',
+      version: '1.0.0',
+    };
+    const newMetaData = { ...existingMetaData };
+    expect(markResourceForRemoval(existingMetaData, newMetaData)).toBe(false);
     [
       // test bundling triggers change
       ['bundle', 'legacy'],
@@ -74,82 +68,126 @@ describe(markResourceForRemoval.name, () => {
       ['cacheName', 'change-cache', false],
     ].forEach(([propName, value, result = true]) => {
       // set the value for a given prop name to validate
-      meta[propName] = value;
+      newMetaData[propName] = value;
       // run validation and observe expected result
-      expect(markResourceForRemoval(metaBluePrint, meta)).toBe(result);
-      // reset the property to match the metaBluePrint
-      meta[propName] = metaBluePrint[propName];
+      expect(markResourceForRemoval(existingMetaData, newMetaData)).toBe(result);
+      // reset the property to match the existingMetaData
+      newMetaData[propName] = existingMetaData[propName];
     });
   });
 });
 
 describe(createResourceMetaData.name, () => {
-  const appInfo = ['app', 'https://example.com/cdn/app/1.2.3-rc.4-abc123/'];
-  const appMetaData = {
-    type: 'one-app',
-    cacheName: 'one-app',
-    name: 'app',
-    bundle: 'browser',
-    version: '1.2.3-rc.4-abc123',
-  };
-  const moduleInfo = ['module', 'https://example.com/cdn/modules/test-root/2.2.2/'];
-  const baseMetaData = {
-    bundle: 'browser',
-    type: 'modules',
-    name: 'module',
-    version: '2.2.2',
-    cacheName: 'modules',
-    revision: '101010',
-  };
   test.each([
     // app
-    ['https://example.com/cdn/app/1.2.3-rc.4-abc123/app.js', appInfo, {
-      ...appMetaData,
-      path: 'app.js',
-    }],
-    ['https://example.com/cdn/app/1.2.3-rc.4-abc123/i18n/en-US.js', appInfo, {
-      ...appMetaData,
-      path: 'i18n/language.js',
-      locale: 'en-US',
-    }],
+    [
+      'https://example.com/cdn/app/1.2.3-rc.4-abc123/app.js',
+      ['app', 'https://example.com/cdn/app/1.2.3-rc.4-abc123/'], {
+        type: 'one-app',
+        cacheName: '__sw/one-app',
+        name: 'app',
+        bundle: 'browser',
+        version: '1.2.3-rc.4-abc123',
+        path: 'app.js',
+      },
+    ],
+    [
+      'https://example.com/cdn/app/1.2.3-rc.4-abc123/i18n/en-US.js',
+      ['app', 'https://example.com/cdn/app/1.2.3-rc.4-abc123/'], {
+        type: 'one-app',
+        cacheName: '__sw/one-app',
+        name: 'app',
+        bundle: 'browser',
+        version: '1.2.3-rc.4-abc123',
+        path: 'i18n/language.js',
+        locale: 'en-US',
+      },
+    ],
     // modules
-    ['https://example.com/cdn/modules/test-root/2.2.2/test-root.browser.js', moduleInfo, {
-      ...baseMetaData,
-      path: 'test-root.browser.js',
-    }],
-    ['https://example.com/cdn/modules/test-root/2.2.2/test-root.legacy.browser.js', moduleInfo, {
-      ...baseMetaData,
-      bundle: 'legacy',
-      path: 'test-root.legacy.browser.js',
-    }],
-    ['https://example.com/cdn/modules/test-root/2.2.2/locale/en-US/test-root.json', moduleInfo, {
-      ...baseMetaData,
-      type: 'lang-packs',
-      path: 'en-US/test-root.json',
-      cacheName: 'lang-packs',
-      locale: 'en-US',
-    }],
-    ['https://example.com/cdn/modules/test-root/2.2.2/test-root.browser.js', moduleInfo, {
-      ...baseMetaData,
-      path: 'test-root.browser.js',
-      revision: null,
-    }],
-  ])('extracts metadata from %s', (url, [type, baseUrl], result) => {
+    [
+      'https://example.com/cdn/modules/test-root/2.2.2/test-root.browser.js',
+      ['module', 'https://example.com/cdn/modules/test-root/2.2.2/'], {
+        bundle: 'browser',
+        type: 'modules',
+        name: 'module',
+        version: '2.2.2',
+        cacheName: '__sw/modules',
+        path: 'test-root.browser.js',
+      },
+    ],
+    [
+      'https://example.com/cdn/modules/test-root/2.2.2/test-root.legacy.browser.js',
+      ['module', 'https://example.com/cdn/modules/test-root/2.2.2/'], {
+        type: 'modules',
+        name: 'module',
+        version: '2.2.2',
+        cacheName: '__sw/modules',
+        bundle: 'legacy',
+        path: 'test-root.legacy.browser.js',
+      },
+    ],
+    [
+      'https://example.com/cdn/modules/test-root/2.2.2/locale/en-US/test-root.json',
+      ['module', 'https://example.com/cdn/modules/test-root/2.2.2/'], {
+        bundle: 'browser',
+        name: 'module',
+        version: '2.2.2',
+        type: 'lang-packs',
+        path: 'en-US/test-root.json',
+        cacheName: '__sw/lang-packs',
+        locale: 'en-US',
+      },
+    ],
+    [
+      'https://example.com/cdn/modules/test-root/2.2.2/test-root.browser.js',
+      ['module', 'https://example.com/cdn/modules/test-root/2.2.2/'], {
+        bundle: 'browser',
+        type: 'modules',
+        name: 'module',
+        version: '2.2.2',
+        cacheName: '__sw/modules',
+        path: 'test-root.browser.js',
+      },
+    ],
+    [
+      'https://example.com/cdn/modules/test-root/2.2.2/test-root.browser.js',
+      ['module', 'https://example.com/cdn/modules/test-root/2.2.2/', '101010'], {
+        bundle: 'browser',
+        type: 'modules',
+        name: 'module',
+        version: '2.2.2',
+        cacheName: '__sw/modules',
+        path: 'test-root.browser.js',
+        revision: '101010',
+      },
+    ],
+  ])('extracts metadata from %s', (url, resourceInfo, result) => {
     // eslint-disable-next-line no-param-reassign
-    if (result.revision === null) delete result.revision;
-    const meta = createResourceMetaData({ request: { url } }, [type, baseUrl], result.revision);
+    const meta = createResourceMetaData({ request: { url } }, resourceInfo);
     expect(meta).toEqual({ ...result, url });
   });
 });
 
 describe(invalidateCacheResource.name, () => {
+  const existingMetaData = {
+    bundle: 'browser',
+    cacheName: '__sw/modules',
+    name: 'my-module',
+    path: 'my-module.browser.js',
+    type: 'modules',
+    url: 'https://example.com/cdn/modules/my-module/1.0.0/my-module.browser.js',
+    version: '1.0.0',
+  };
+
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
   test('gets the resource metadata and validates the incoming request', async () => {
+    expect.assertions(6);
+
     const waitUntil = jest.fn();
-    const meta = { ...metaBluePrint };
+    const meta = { ...existingMetaData };
     const event = { request: { url: meta.url }, waitUntil };
     const response = {};
     const responseHandler = invalidateCacheResource(event, meta);
@@ -159,25 +197,30 @@ describe(invalidateCacheResource.name, () => {
     expect(responseHandler(response)).toBe(response);
     expect(waitUntil).toHaveBeenCalledTimes(1);
     expect(getMetaData).toHaveBeenCalledTimes(1);
-    expect(getMetaData).toHaveBeenCalledWith({ cacheName: 'modules/assets/cat.jpg', url: 'http://localhost/modules/assets/cat.jpg' });
+    expect(getMetaData).toHaveBeenCalledWith({ cacheName: 'modules/my-module/my-module.browser.js' });
     await waitUntil.mock.calls[0][0];
     expect(setMetaData).toHaveBeenCalledTimes(1);
     expect(remove).not.toHaveBeenCalled();
   });
 
   test('invalidates the incoming request due to version change', async () => {
+    expect.assertions(7);
+
+    const meta = { ...existingMetaData };
+    const newVersion = '1.0.5';
+    const newUrl = meta.url.replace(meta.version, newVersion);
+
     const waitUntil = jest.fn();
-    const meta = { ...metaBluePrint };
-    const event = { request: { url: meta.url }, waitUntil };
+    const event = { request: { url: newUrl }, waitUntil };
     const response = {};
     const responseHandler = invalidateCacheResource(event, meta);
 
-    getMetaData.mockImplementationOnce(() => Promise.resolve({ ...meta, version: '0.0.5' }));
+    getMetaData.mockImplementationOnce(() => Promise.resolve({ ...meta, version: newVersion }));
 
     expect(responseHandler(response)).toBe(response);
     expect(waitUntil).toHaveBeenCalledTimes(1);
     expect(getMetaData).toHaveBeenCalledTimes(1);
-    expect(getMetaData).toHaveBeenCalledWith({ cacheName: 'modules/assets/cat.jpg', url: 'http://localhost/modules/assets/cat.jpg' });
+    expect(getMetaData).toHaveBeenCalledWith({ cacheName: 'modules/my-module/my-module.browser.js' });
     await waitUntil.mock.calls[0][0];
     expect(waitUntil).toHaveBeenCalledTimes(2);
     expect(setMetaData).toHaveBeenCalledTimes(1);
@@ -186,11 +229,19 @@ describe(invalidateCacheResource.name, () => {
 });
 
 describe(setCacheResource.name, () => {
+  const mockMetaData = {
+    path: 'my-module.browser.js',
+    url: 'https://example.com/cdn/modules/my-module/1.0.0/my-module.browser.js',
+    cacheName: '__sw/modules',
+  };
+
   test('calls "put" on the cache with the resource', async () => {
+    expect.assertions(5);
+
     const clone = jest.fn(() => 'clone');
     const waitUntil = jest.fn();
-    const meta = { cacheName: metaBluePrint.cacheName };
-    const event = { request: { url: metaBluePrint.url, clone }, waitUntil };
+    const meta = { cacheName: mockMetaData.cacheName };
+    const event = { request: { url: mockMetaData.url, clone }, waitUntil };
     const response = { clone };
     const responseHandler = setCacheResource(event, meta);
 
@@ -203,14 +254,22 @@ describe(setCacheResource.name, () => {
 });
 
 describe(fetchCacheResource.name, () => {
+  const mockMetaData = {
+    path: 'my-module.browser.js',
+    url: 'https://example.com/cdn/modules/my-module/1.0.0/my-module.browser.js',
+    cacheName: '__sw/modules',
+  };
+
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
   test('calls "match" on the cache falling back to "fetch"  and finally runs invalidation', async () => {
+    expect.assertions(5);
+
     const clone = jest.fn(() => 'clone');
     const waitUntil = jest.fn();
-    const meta = { ...metaBluePrint };
+    const meta = { ...mockMetaData };
     const event = { request: { url: meta.url, clone }, waitUntil };
     const response = { clone };
 
@@ -220,13 +279,15 @@ describe(fetchCacheResource.name, () => {
     expect(clone).toHaveBeenCalledTimes(4);
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(match).toHaveBeenCalledTimes(1);
-    expect(match).toHaveBeenCalledWith('clone', { cacheName: metaBluePrint.cacheName });
+    expect(match).toHaveBeenCalledWith('clone', { cacheName: mockMetaData.cacheName });
   });
 
   test('calls "match" and responds from the cache', async () => {
+    expect.assertions(5);
+
     const clone = jest.fn(() => 'clone');
     const waitUntil = jest.fn();
-    const meta = { ...metaBluePrint };
+    const meta = { ...mockMetaData };
     const event = { request: { url: meta.url, clone }, waitUntil };
     const response = { clone };
 
@@ -236,6 +297,6 @@ describe(fetchCacheResource.name, () => {
     expect(clone).toHaveBeenCalledTimes(1);
     expect(fetch).not.toHaveBeenCalled();
     expect(match).toHaveBeenCalledTimes(1);
-    expect(match).toHaveBeenCalledWith('clone', { cacheName: metaBluePrint.cacheName });
+    expect(match).toHaveBeenCalledWith('clone', { cacheName: mockMetaData.cacheName });
   });
 });
